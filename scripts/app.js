@@ -26,55 +26,50 @@ define([
 
   // PURE //////////////////////////////////////////////////
   
-  //  api_key :: String
-  var api_key = 'AIzaSyAWoa7aqds2Cx_drrrb5FPsRObFa7Dxkfg';
+var listen = _.curry(function(type, elt) {
+  return Bacon.fromEventTarget(elt, type);
+});
 
-  //+ eventValue :: DomEvent -> String
-  var eventValue = compose(_.get('value'), _.get('target'));
+// getDom :: string -> IO DOM
+var getDom = $.toIO();
 
-  //+ valueStream :: DomEvent -> EventStream String
-  var valueStream = compose(map(eventValue), listen('keyup'));
+// appendDom :: string -> HTML -> IO DOM
+var appendDom = _.curry(function(sel, elt) {
+  return $(sel).append(elt);
+});
 
-  //+ termToUrl :: String -> URL
-  var termToUrl = function(term) {
-    return 'https://www.googleapis.com/youtube/v3/search?' +
-      $.param({part: 'snippet', q: term, key: api_key});
-  };
+// appendToResults :: string -> fn
+var appendToResults = appendDom('#results');
 
-  //+ urlStream :: DomEvent -> EventStream String
-  var urlStream = compose(map(termToUrl), valueStream);
+// eventValue :: DOMEvent -> a
+var eventValue = compose(_.get('value'), _.get('target')); 
 
-  //+ getInputStream :: Selector -> IO EventStream String
-  var getInputStream = compose(map(urlStream), $.toIO());
+// termUrl :: string -> URL
+var termUrl = s => `https://swapi.co/api/people/?search=${s}`;
 
-  //+ render :: Entry -> Dom
-  var render = function(e) {
-    return $('<li/>', {text: e.snippet.title, 'data-youtubeid': e.id.videoId});
-  };
+// dataToLi :: string -> HTML
+var dataToLi = s => $(`<li>${s}</li>`);
 
-  //+ videoEntries :: YoutubeResponse -> [Dom]
-  var videoEntries = compose(map(render), _.get('items'));
+// keypressStream :: DOM -> EventStream DOMEvent
+var keypressStream = listen('keyup');
 
-  //+ search :: URL -> Future [Dom]
-  var search = compose(map(videoEntries), http.getJSON);
+// valueStream :: DOM -> EventStream DOMEvent
+var valueStream = compose(map(eventValue), keypressStream)
 
-  //+ DomElement -> EventStream DomElement
-  var clickStream = compose(map(_.get('target')), listen('click'));
+// urlStream :: DOM -> EventStream URL
+var urlStream = compose(map(termUrl), valueStream);
 
-  //+ URL -> String
-  var idInUrl = compose(last, _.split('/'));
+// search :: string -> Future Stream
+var searchStream = compose(map(http.getJSON), urlStream);
 
-  //+ youtubeLink :: DomElement -> Maybe ID
-  var youtubeId = compose(map(idInUrl), Maybe, getData('youtubeid'));
+// dataStream :: JSON -> string
+var transformData = compose(dataToLi, _.get('name'), _.head, _.get('results'));
+
+// htmlStream :: string -> DOM
+var htmlStream = compose(map(map(transformData)), searchStream);
 
   // IMPURE /////////////////////////////////////////////////////
 
-  getInputStream('#search').runIO().onValue(
-    compose(fork(setHtml('#results')), search)
-  );
-
-  clickStream(document).onValue(
-    compose(map(compose(setHtml('#player'), Player.create)), youtubeId)
-  );
+getDom('#search').map(htmlStream).runIO().onValue(fork(appendToResults));
 
 });
